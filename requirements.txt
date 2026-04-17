@@ -1,0 +1,6 @@
+pyaudio
+vosk
+pyttsx3
+edge-tts
+playsound==1.2.2
+groq
