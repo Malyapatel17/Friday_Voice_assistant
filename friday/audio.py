@@ -1,5 +1,9 @@
 """
 friday/audio.py — Microphone stream, wake word, command & chat detection
+
+NOTE: vosk-model-en-us-0.22 does NOT support runtime grammar graphs.
+      All three recognizers use free-form transcription; keywords are
+      matched in plain Python after the fact.
 """
 
 import json
@@ -11,41 +15,25 @@ from vosk import KaldiRecognizer, Model
 class AudioManager:
     """Owns the PyAudio stream and all Vosk recognizers."""
 
-    SAMPLE_RATE = 16000
-    FRAME_LENGTH = 4000  # 250ms chunks
+    SAMPLE_RATE  = 16000
+    FRAME_LENGTH = 4000   # 250 ms chunks
 
     def __init__(self, model_path, wake_word):
-        self.wake_word = wake_word
+        self.wake_word = wake_word.lower()
 
-        # Load Vosk model once — shared across all recognizers
         print(f"📂 Loading speech model from '{model_path}'...")
         model = Model(model_path=model_path)
 
-        # Wake word recognizer (narrow grammar)
-        self.wake_recognizer = KaldiRecognizer(
-            model, self.SAMPLE_RATE,
-            f'["{wake_word}", "[unk]"]'
-        )
+        # All three recognizers use FREE-FORM transcription (no grammar arg)
+        # because vosk-model-en-us-0.22 doesn't support runtime graphs.
+        self.wake_recognizer    = KaldiRecognizer(model, self.SAMPLE_RATE)
+        self.command_recognizer = KaldiRecognizer(model, self.SAMPLE_RATE)
+        self.chat_recognizer    = KaldiRecognizer(model, self.SAMPLE_RATE)
 
-        # Command recognizer (known command phrases)
-        self.command_recognizer = KaldiRecognizer(
-            model, self.SAMPLE_RATE,
-            '["let\'s start the work", "start the work", "lets start the work", '
-            '"daddy is home", "daddy\'s home", '
-            '"let\'s chat", "lets chat", "hey chat", '
-            '"close all tabs", "close tabs", '
-            '"you can rest", "take a rest", "rest now", '
-            '"goodbye", "stop", "exit", "bye", "[unk]"]'
-        )
-
-        # Chat recognizer — no grammar, free transcription
-        self.chat_recognizer = KaldiRecognizer(model, self.SAMPLE_RATE)
-
-        # PyAudio
-        self.pa = pyaudio.PyAudio()
+        self.pa     = pyaudio.PyAudio()
         self.stream = None
 
-    # ── Stream ────────────────────────────────────────────────────────────
+    # ── Stream ────────────────────────────────────────────────────────────────
 
     def start_stream(self):
         self.stream = self.pa.open(
@@ -59,49 +47,64 @@ class AudioManager:
     def read_frame(self):
         return self.stream.read(self.FRAME_LENGTH, exception_on_overflow=False)
 
-    # ── Wake word ─────────────────────────────────────────────────────────
+    # ── Wake word ─────────────────────────────────────────────────────────────
 
     def detect_wake_word(self, audio_bytes):
+        """Return True when the wake word is heard."""
         if self.wake_recognizer.AcceptWaveform(audio_bytes):
-            result = json.loads(self.wake_recognizer.Result())
-            text = result.get("text", "").lower()
+            text = json.loads(self.wake_recognizer.Result()).get("text", "").lower()
+            if text:
+                print(f"[wake] heard: '{text}'")
             return self.wake_word in text
-        return False
+        # Also check partial results so there's no 1-second lag
+        partial = json.loads(self.wake_recognizer.PartialResult()).get("partial", "").lower()
+        return self.wake_word in partial
 
-    # ── Command ───────────────────────────────────────────────────────────
+    # ── Command ───────────────────────────────────────────────────────────────
 
     def detect_command(self, audio_bytes):
-        """Returns 'work' | 'home' | 'chat' | 'stop' | None"""
+        """Returns 'work' | 'home' | 'chat' | 'close_tabs' | 'rest' | 'stop' | None"""
         if self.command_recognizer.AcceptWaveform(audio_bytes):
-            result = json.loads(self.command_recognizer.Result())
-            text = result.get("text", "").lower()
+            text = json.loads(self.command_recognizer.Result()).get("text", "").lower()
             if text:
-                if "start" in text and "work" in text:
-                    return "work"
-                if "daddy" in text or ("home" in text and "start" not in text):
-                    return "home"
-                if "chat" in text or "talk" in text:
-                    return "chat"
-                if "close" in text and ("tab" in text or "tabs" in text):
-                    return "close_tabs"
-                if "rest" in text:
-                    return "rest"
-                if any(w in text for w in ["goodbye", "stop", "exit", "bye"]):
-                    return "stop"
+                print(f"[command] heard: '{text}'")
+                return self._parse_command(text)
+
+        # Check partials too so commands feel snappy
+        partial = json.loads(self.command_recognizer.PartialResult()).get("partial", "").lower()
+        if partial:
+            return self._parse_command(partial)
+
         return None
 
-    # ── Chat transcription ────────────────────────────────────────────────
+    def _parse_command(self, text):
+        if not text:
+            return None
+        if ("start" in text and "work" in text) or "start work" in text:
+            return "work"
+        if "daddy" in text or ("home" in text and "start" not in text):
+            return "home"
+        if "chat" in text or ("let" in text and "talk" in text):
+            return "chat"
+        if "close" in text and ("tab" in text or "browser" in text):
+            return "close_tabs"
+        if "rest" in text or "you can rest" in text or "take a rest" in text:
+            return "rest"
+        if any(w in text for w in ["goodbye", "stop", "exit", "bye"]):
+            return "stop"
+        return None
+
+    # ── Chat transcription ────────────────────────────────────────────────────
 
     def detect_chat_speech(self, audio_bytes):
         """Returns transcribed text string or None."""
         if self.chat_recognizer.AcceptWaveform(audio_bytes):
-            result = json.loads(self.chat_recognizer.Result())
-            text = result.get("text", "").strip()
+            text = json.loads(self.chat_recognizer.Result()).get("text", "").strip()
             if text and text != "[unk]":
                 return text
         return None
 
-    # ── Flush / cleanup ───────────────────────────────────────────────────
+    # ── Flush / cleanup ───────────────────────────────────────────────────────
 
     def flush(self):
         """Reset all recognizer buffers — call on every state transition."""

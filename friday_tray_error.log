@@ -1,0 +1,56 @@
+[2026-04-17 16:56:23] Tray app started
+[2026-04-17 16:56:25] Started Friday (PID 19724)
+[2026-04-17 16:56:27] Friday process ended (exit code 1)
+[2026-04-17 16:57:07] stop_friday called but not running
+[2026-04-17 16:57:22] Tray app started
+[2026-04-17 16:57:24] Started Friday (PID 1140)
+[2026-04-17 16:57:26] Friday process ended (exit code 1)
+[2026-04-17 17:17:57] Tray app started
+[2026-04-17 17:17:59] Started Friday (PID 24316)
+[2026-04-17 17:18:09] Friday process ended (exit code 0)
+[2026-04-17 17:18:22] stop_friday called but not running
+[2026-04-17 17:18:53] stop_friday called but not running
+[2026-04-17 17:28:37] Tray app started
+[2026-04-17 17:28:39] Started Friday (PID 804)
+[2026-04-17 17:29:09] Friday process ended (exit code 0)
+[2026-04-17 17:29:47] Started Friday (PID 13188)
+[2026-04-17 17:31:07] start_friday called but already running
+[2026-04-17 17:38:53] Friday process ended (exit code 0)
+[2026-04-17 17:38:58] stop_friday called but not running
+[2026-04-17 18:00:25] Tray app started
+[2026-04-17 18:00:27] Started Friday (PID 4540)
+[2026-04-17 18:00:29] Friday stopped by user
+[2026-04-17 18:00:36] Tray app started
+[2026-04-17 18:00:38] Started Friday (PID 22380)
+[2026-04-17 18:02:12] Friday process ended (exit code 255)
+[2026-04-17 18:03:17] Started Friday (PID 19968)
+[2026-04-17 18:04:35] start_friday called but already running
+[2026-04-17 18:05:11] Friday stopped by user
+[2026-04-17 18:05:16] Started Friday (PID 25272)
+[2026-04-17 18:06:51] Friday stopped by user
+[2026-04-17 18:14:20] Started Friday (PID 9812)
+[2026-04-17 18:15:32] Friday process ended (exit code 0)
+[2026-04-17 18:15:54] Started Friday (PID 14600)
+[2026-04-17 18:17:49] Friday process ended (exit code 3221225786)
+[2026-04-17 19:10:14] Started Friday (PID 25112)
+[2026-04-17 19:12:30] Friday stopped by user
+[2026-04-17 19:12:36] Started Friday (PID 3196)
+[2026-04-17 19:14:37] Friday process ended (exit code 3221225786)
+[2026-04-17 20:23:46] Tray app started
+[2026-04-17 20:23:48] Started Friday (PID 20328)
+[2026-04-17 20:29:45] Friday stopped by user
+[2026-04-18 09:34:22] Tray app started
+[2026-04-18 09:34:24] Started Friday (PID 21072)
+[2026-04-18 09:36:06] Friday stopped by user
+[2026-04-18 09:38:40] stop_friday called but not running
+[2026-04-19 01:09:03] Tray app started
+[2026-04-19 01:09:05] Started Friday (PID 23736)
+[2026-04-19 01:12:58] Friday stopped by user
+[2026-04-19 01:13:03] stop_friday called but not running
+[2026-04-20 09:10:33] Tray app started
+[2026-04-20 09:10:35] Started Friday (PID 28652)
+[2026-04-20 09:10:49] Friday process ended (exit code 3221225786)
+[2026-04-20 09:10:53] stop_friday called but not running
+[2026-04-20 15:11:35] Tray app started
+[2026-04-20 15:11:37] Started Friday (PID 4592)
+[2026-04-20 15:14:31] Friday process ended (exit code 0)

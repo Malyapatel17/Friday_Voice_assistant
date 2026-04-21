@@ -1,6 +1,6 @@
 """
 friday/tts.py — Text-to-Speech
-  Online  → edge-tts Jenny Neural voice
+  Online  → edge-tts Jenny Neural voice (played via pygame)
   Offline → pyttsx3 Microsoft Zira
 """
 
@@ -39,6 +39,51 @@ def speak(text, audio_stream=None, is_online=False, offline_voice_id=None, tts_r
         _speak_offline(text, audio_stream, offline_voice_id, tts_rate)
 
 
+def _play_mp3(path):
+    """
+    Play an MP3 file silently through the default speaker.
+    Uses pygame (no dialogs, no popups, works from tray/BAT context).
+    Falls back to pydub if pygame is missing.
+    """
+    try:
+        import pygame
+        pygame.mixer.init()
+        pygame.mixer.music.load(path)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            pygame.time.wait(50)
+        pygame.mixer.music.stop()
+        pygame.mixer.quit()
+        return
+    except ImportError:
+        pass  # pygame not installed, try pydub
+
+    try:
+        from pydub import AudioSegment
+        from pydub.playback import play
+        audio = AudioSegment.from_mp3(path)
+        play(audio)
+        return
+    except ImportError:
+        pass  # pydub not installed either
+
+    # Last resort: PowerShell MediaPlayer (no dialog, but timing is approximate)
+    import subprocess, time
+    escaped = path.replace("\\", "\\\\")
+    subprocess.run(
+        [
+            "powershell", "-NoProfile", "-NonInteractive", "-c",
+            f'Add-Type -AssemblyName PresentationCore;'
+            f'$p=[System.Windows.Media.MediaPlayer]::new();'
+            f'$p.Open([uri]"{escaped}");'
+            f'$p.Play();'
+            f'Start-Sleep -Seconds 5'
+        ],
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        timeout=10
+    )
+
+
 def _speak_online(text, audio_stream, offline_voice_id, tts_rate):
     """Speak using edge-tts (Jenny Neural). Falls back to offline on error."""
     tmp_path = None
@@ -57,14 +102,7 @@ def _speak_online(text, audio_stream, offline_voice_id, tts_rate):
             return path
 
         tmp_path = asyncio.run(_generate())
-
-        try:
-            from playsound import playsound
-            playsound(tmp_path)
-        except Exception:
-            # Fallback: open with default player
-            os.startfile(tmp_path)
-            import time; time.sleep(3)
+        _play_mp3(tmp_path)
 
     except Exception as e:
         print(f"⚠️  Online TTS error: {e} — falling back to offline voice")
