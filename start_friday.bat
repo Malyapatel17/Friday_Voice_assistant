@@ -17,6 +17,9 @@ if not exist "%MODEL%\" (
     echo.
     echo  ERROR: Vosk model folder not found!
     echo  Expected: %MODEL%
+    echo  Download vosk-model-small-en-us-0.15 from:
+    echo  https://alphacephei.com/vosk/models
+    echo  Extract it and rename the folder to "model"
     echo.
     pause
     exit /b 1
@@ -36,8 +39,8 @@ echo [%DATE% %TIME%] Friday exited (code %EXIT_CODE%) >> "%LOG%"
 
 if %EXIT_CODE% NEQ 0 (
     echo.
-    echo  *** Friday crashed with exit code %EXIT_CODE% ***
-    echo  Check the error above or open: %LOG%
+    echo  *** Friday exited with code %EXIT_CODE% ***
+    echo  Check friday_startup.log for details
     echo.
     pause
 )

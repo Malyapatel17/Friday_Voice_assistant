@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Friday — Voice-Activated AI Assistant
+Friday — Voice-Activated Assistant  (Phase 1)
 Run: python main.py [--model path/to/model] [--debug]
 
-Commands after saying 'Friday':
-  "Let's start the work" → Opens Claude.ai, ChatGPT, VS Code
-  "Daddy is home"        → Opens YouTube, Hotstar, Amazon Prime
-  "Let's chat"           → Enters free AI conversation mode (Groq)
+Say "Friday" → then within 30 seconds say a command:
+  "Let's start the work"  →  Claude.ai + ChatGPT + VS Code
+  "Daddy is home"         →  YouTube + Hotstar + Amazon Prime
+  "Close all tabs"        →  Close browsers + shutdown dialog
+  "You can rest"          →  Exit Friday
 """
 
 import platform
@@ -14,214 +15,164 @@ import signal
 import sys
 import time
 
-import friday.config as config
-from friday.audio import AudioManager
-from friday.conversation import GroqChat, check_internet
-from friday import launcher
-from friday.tts import discover_offline_voice_id, speak
+import friday.config as cfg
+from friday.audio  import AudioManager
+from friday        import launcher
+from friday.tts    import discover_offline_voice_id, speak
 
 # ── States ────────────────────────────────────────────────────────────────────
 STANDBY = "standby"
 COMMAND = "command"
-CHAT = "chat"
 
 
 class FridayCore:
-    def __init__(self, model_path=None, debug=False):
-        self.debug = debug
+
+    def __init__(self, model_path: str | None = None, debug: bool = False):
+        self.debug   = debug
         self.os_type = platform.system()
-
-        print("=" * 70)
-        print("  🤖 FRIDAY — Voice AI Assistant")
-        print("=" * 70)
-        print(f"\n🖥️  Detected OS: {self.os_type}")
-
-        # Override model path if supplied via CLI
-        if model_path:
-            config.MODEL_PATH = model_path
-
-        # Internet check
-        print("🌐 Checking internet connection...")
-        self.is_online = check_internet()
-        if self.is_online:
-            print("   ✅ Online  — Jenny voice + Groq AI active")
-        else:
-            print("   ❌ Offline — Zira voice, no AI chat")
-        print()
-
-        # TTS — discover offline voice once at startup
-        self.offline_voice_id = discover_offline_voice_id()
-
-        # Audio / speech recognition
-        self.audio = AudioManager(
-            model_path=config.MODEL_PATH,
-            wake_word=config.WAKE_WORD
-        )
-
-        # Groq chat (only if online and API key configured)
-        self.groq = None
-        if self.is_online and config.GROQ_API_KEY != "YOUR_GROQ_KEY_HERE":
-            try:
-                self.groq = GroqChat(config.GROQ_API_KEY, config.GROQ_MODEL)
-                print("✅ Groq AI ready!")
-            except Exception as e:
-                print(f"⚠️  Groq init failed: {e}")
-        elif self.is_online:
-            print("⚠️  Add your Groq API key in friday/config.py to enable chat mode")
-
-        # State machine
-        self.state = STANDBY
-        self.state_start_time = time.time()
-        self.chat_last_activity = 0
         self.running = True
 
-        signal.signal(signal.SIGINT, self._signal_handler)
+        print("=" * 60)
+        print("  🤖  FRIDAY  —  Voice Assistant  (Phase 1)")
+        print("=" * 60)
+        print(f"\n🖥️   OS : {self.os_type}\n")
+
+        # Allow CLI to override model path
+        if model_path:
+            cfg.MODEL_PATH = model_path
+
+        # Discover offline TTS voice once at startup
+        self.voice_id = discover_offline_voice_id()
+
+        # Audio engine (Vosk wake + Whisper commands)
+        self.audio = AudioManager(
+            model_path=cfg.MODEL_PATH,
+            wake_word=cfg.WAKE_WORD,
+        )
+
+        # State machine bookkeeping
+        self.state      = STANDBY
+        self.cmd_start  = 0.0          # when COMMAND state began
+
+        signal.signal(signal.SIGINT, self._on_ctrl_c)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _signal_handler(self, sig, frame):
+    def _on_ctrl_c(self, *_):
         print("\n\n👋 Shutting down Friday...")
         self.running = False
 
-    def _speak(self, text):
+    def _speak(self, text: str):
         speak(
             text,
             audio_stream=self.audio.stream,
-            is_online=self.is_online,
-            offline_voice_id=self.offline_voice_id,
-            tts_rate=config.TTS_RATE
+            is_online=False,                  # Phase 1: offline only
+            offline_voice_id=self.voice_id,
+            tts_rate=cfg.TTS_RATE,
         )
 
-    def _set_state(self, new_state):
-        self.state = new_state
-        self.state_start_time = time.time()
+    def _go(self, new_state: str):
+        """Transition to a new state and flush stale audio buffers."""
+        self.state     = new_state
+        self.cmd_start = time.time()
         self.audio.flush()
         if self.debug:
-            print(f"[state] → {new_state}")
+            print(f"[state → {new_state}]")
 
-    # ── State handlers ────────────────────────────────────────────────────────
+    # ── Standby handler (streaming, frame-by-frame) ───────────────────────────
 
-    def _handle_standby(self, frame):
+    def _handle_standby(self, frame: bytes):
         if self.audio.detect_wake_word(frame):
-            self._set_state(COMMAND)
-            print("\n" + "=" * 60)
-            print("✨ FRIDAY ACTIVATED — say your command...")
-            print("   🖥️  'Let's start the work'")
-            print("   🎬  'Daddy is home'")
-            print("   💬  'Let's chat'")
-            print("   🔴  'Close all tabs'")
-            print("   😴  'You can rest'")
-            print(f"⏱️  You have {config.ACTIVE_DURATION} seconds...")
-            print("=" * 60 + "\n")
+            self._go(COMMAND)
+            print("\n" + "=" * 55)
+            print("✨ FRIDAY ACTIVATED — say your command:")
+            print("   🖥️   'Let's start the work'")
+            print("   🎬   'Daddy is home'")
+            print("   🔴   'Close all tabs'")
+            print("   😴   'You can rest'")
+            print(f"⏱️   {cfg.ACTIVE_DURATION} second window")
+            print("=" * 55 + "\n")
             self._speak("Yes boss, I'm listening")
 
-    def _handle_command(self, frame):
-        cmd = self.audio.detect_command(frame)
-        elapsed = time.time() - self.state_start_time
+    # ── Command handler (blocking record → transcribe → act) ─────────────────
+
+    def _handle_command(self):
+        # Timeout guard — if user never speaks, go back to standby
+        if time.time() - self.cmd_start > cfg.ACTIVE_DURATION:
+            self._speak("Didn't catch that boss, say Friday to try again")
+            self._go(STANDBY)
+            return
+
+        # Record up to 6 s (stops early on silence)
+        audio = self.audio.record_command()
+        text  = self.audio.transcribe_command(audio)
+        cmd   = self.audio.parse_command(text)
 
         if cmd == "work":
             self._speak("Starting work mode boss")
             launcher.launch_work_apps(self.os_type)
-            self._set_state(STANDBY)
+            self._go(STANDBY)
 
         elif cmd == "home":
             self._speak("Welcome home boss, entertainment is ready")
             launcher.launch_entertainment_apps(self.os_type)
-            self._set_state(STANDBY)
-
-        elif cmd == "chat":
-            if self.is_online and self.groq:
-                self._set_state(CHAT)
-                self.chat_last_activity = time.time()
-                self.groq.reset()
-                self._speak("Chat mode on boss, what's on your mind?")
-            else:
-                self._speak("Sorry boss, no internet connection available for chat")
-                self._set_state(STANDBY)
+            self._go(STANDBY)
 
         elif cmd == "close_tabs":
             self._speak("Closing all tabs boss")
             launcher.close_browsers(self.os_type)
             time.sleep(1)
             launcher.open_shutdown_dialog(self.os_type)
-            self._set_state(STANDBY)
+            self._go(STANDBY)
 
         elif cmd == "rest":
             self._speak("Goodbye boss, have a great day")
             self.running = False
 
-        elif elapsed > config.ACTIVE_DURATION:
-            self._speak("Didn't catch that boss, can you repeat")
-            self._set_state(STANDBY)
-
-    def _handle_chat(self, frame):
-        text = self.audio.detect_chat_speech(frame)
-        inactivity = time.time() - self.chat_last_activity
-
-        if text:
-            self.chat_last_activity = time.time()
-            if self.debug:
-                print(f"[chat] You: {text}")
-
-            if any(w in text.lower() for w in ["goodbye", "stop", "exit", "bye"]):
-                self._speak("Goodbye boss, have a great day")
-                self._set_state(STANDBY)
-                return
-
-            print(f"You: {text}")
-            try:
-                reply = self.groq.ask(text)
-                self._speak(reply)
-            except Exception as e:
-                print(f"⚠️  Groq error: {e}")
-                self._speak("Sorry boss, I couldn't get a response right now")
-
-        elif inactivity > config.CHAT_TIMEOUT:
-            self._speak("Going to sleep boss, call me when you need me")
-            self._set_state(STANDBY)
+        else:
+            # Heard something but didn't match — stay in COMMAND, keep listening
+            if self.debug and text:
+                print(f"[no match] '{text}'")
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def run(self):
         self.audio.start_stream()
-        print(f"🎧 Listening for '{config.WAKE_WORD}'...")
-        print("💡 Say the wake word to activate\n")
+        print(f"\n🎧 Listening for wake word  '{cfg.WAKE_WORD}' ...")
+        print("💡 Press Ctrl+C to exit\n")
 
         try:
             while self.running:
-                frame = self.audio.read_frame()
-
                 if self.state == STANDBY:
+                    frame = self.audio.read_frame()
                     self._handle_standby(frame)
                 elif self.state == COMMAND:
-                    self._handle_command(frame)
-                elif self.state == CHAT:
-                    self._handle_chat(frame)
-
+                    self._handle_command()     # blocks during recording
         except KeyboardInterrupt:
-            print("\n\n👋 Shutting down...")
-        except Exception as e:
-            print(f"\n❌ Error: {e}")
+            print("\n\n👋 Bye!")
+        except Exception as exc:
+            print(f"\n❌ Unexpected error: {exc}")
             import traceback
             traceback.print_exc()
         finally:
             self.audio.cleanup()
+            print("Goodbye!")
 
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
-    debug_mode = "--debug" in sys.argv
+    debug = "--debug" in sys.argv
 
-    model_path = None
+    model = None
     for i, arg in enumerate(sys.argv):
         if arg == "--model" and i + 1 < len(sys.argv):
-            model_path = sys.argv[i + 1]
+            model = sys.argv[i + 1]
 
-    if not debug_mode:
-        print("💡 Tip: Run with '--debug' to see what Friday hears")
-        print("💡 Tip: Run with '--model path/to/model' to use a different model\n")
+    if not debug:
+        print("💡 Run with --debug to see live transcripts\n")
 
-    core = FridayCore(model_path=model_path, debug=debug_mode)
-    core.run()
+    FridayCore(model_path=model, debug=debug).run()
 
 
 if __name__ == "__main__":
