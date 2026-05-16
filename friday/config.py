@@ -15,3 +15,13 @@ ACTIVE_DURATION = 30
 
 # Offline TTS speech rate (words per minute)
 TTS_RATE = 180
+
+# ─────────────────────────────────────────────
+# Chrome profile mapping (work mode)
+# ─────────────────────────────────────────────
+# Resolve profile dirs with:
+#   Get-ChildItem "$env:LOCALAPPDATA\Google\Chrome\User Data" -Directory
+# Pick the directory whose Preferences file contains the email you want.
+CHROME_PATH             = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+CHROME_WORK_PROFILE     = "Profile 5"  # malya.patel@bytestechnolab.com
+CHROME_PERSONAL_PROFILE = "Default"    # malyapatel17@gmail.com
