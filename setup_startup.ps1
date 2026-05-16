@@ -56,35 +56,41 @@ $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 Remove-ItemProperty -Path $regPath -Name "FridayTray" -ErrorAction SilentlyContinue
 Write-Host "  [OK] Registry Run key removed (if existed)" -ForegroundColor Green
 
-# Task Scheduler - try multiple possible names/paths from old setups
-$taskNames = @(
-    "\Friday\Friday Tray Icon",
-    "\Friday Tray Icon",
-    "Friday Tray Icon"
-)
-foreach ($taskName in $taskNames) {
-    $exists = Get-ScheduledTask -TaskName ($taskName.Split("\")[-1]) -ErrorAction SilentlyContinue
-    if ($exists) {
-        Unregister-ScheduledTask -TaskName ($taskName.Split("\")[-1]) -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Host "  [OK] Removed Task Scheduler entry: $taskName" -ForegroundColor Green
-    }
+# Task Scheduler - discover ANY task whose name or action references Friday
+# or this project folder. Wildcard sweep is idempotent and survives renames.
+$friday_tasks = Get-ScheduledTask | Where-Object {
+    $_.TaskName -like "*Friday*" -or
+    (($_.Actions | ForEach-Object { $_.Execute }) -like "*friday*") -or
+    (($_.Actions | ForEach-Object { $_.Execute }) -like "*wake-up*")
+}
+foreach ($t in $friday_tasks) {
+    Unregister-ScheduledTask -TaskName $t.TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Host "  [OK] Removed Task Scheduler entry: $($t.TaskName)" -ForegroundColor Green
+}
+if (-not $friday_tasks) {
+    Write-Host "  [OK] No Friday-related scheduled tasks to remove" -ForegroundColor Green
 }
 
-# Startup folder shortcuts -- remove ALL known Friday entries.
-# These bypass the tray mutex (especially the BAT-launching one), so they
-# must be removed or they'll spawn extra Friday instances at login.
-$startup       = [Environment]::GetFolderPath("Startup")
-$staleShortcuts = @(
-    "Friday Tray.lnk",
-    "Friday Tray Startup.lnk",
-    "Friday Assistant Startup.lnk"
-)
-foreach ($name in $staleShortcuts) {
-    $lnk = Join-Path $startup $name
-    if (Test-Path $lnk) {
-        Remove-Item $lnk -Force -ErrorAction SilentlyContinue
-        Write-Host "  [OK] Removed Startup folder shortcut: $name" -ForegroundColor Green
+# Startup folder shortcuts -- remove ANY .lnk whose target references Friday
+# or this project folder. These bypass the tray mutex if not removed.
+$startup = [Environment]::GetFolderPath("Startup")
+$wsh_check = New-Object -ComObject WScript.Shell
+$removed_lnk = 0
+Get-ChildItem -Path $startup -Filter "*.lnk" -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+        $sc_check = $wsh_check.CreateShortcut($_.FullName)
+        $target   = "$($sc_check.TargetPath) $($sc_check.Arguments)"
+    } catch {
+        return  # skip unreadable shortcuts
     }
+    if ($_.Name -like "*Friday*" -or $target -like "*friday_tray*" -or $target -like "*wake-up*") {
+        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+        Write-Host "  [OK] Removed Startup folder shortcut: $($_.Name)" -ForegroundColor Green
+        $removed_lnk++
+    }
+}
+if ($removed_lnk -eq 0) {
+    Write-Host "  [OK] No Friday-related Startup folder shortcuts to remove" -ForegroundColor Green
 }
 
 Write-Host "  [OK] All old entries cleared" -ForegroundColor Green
