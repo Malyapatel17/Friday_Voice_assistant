@@ -20,6 +20,12 @@ import tkinter as tk
 import traceback
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv is optional at runtime; env vars still work without it
+
 import friday.config as cfg
 from friday.audio import AudioManager
 from friday       import launcher
@@ -114,7 +120,8 @@ class FridayCore:
             print("\n" + "=" * 55)
             print("FRIDAY ACTIVATED -- say your command")
             print("=" * 55 + "\n")
-            self._speak("Yes boss, I'm listening")
+            from friday.personality import wake_ack
+            self._speak(wake_ack())
 
     # -- Command handler -------------------------------------------------------
 
@@ -225,6 +232,7 @@ class FridayCore:
 def main():
     debug    = "--debug" in sys.argv
     use_hud  = "--no-hud" not in sys.argv
+    say_greeting = "--no-greeting" not in sys.argv
 
     model = None
     for i, arg in enumerate(sys.argv):
@@ -262,6 +270,13 @@ def main():
         core.run()
 
     core_thread = threading.Thread(target=_run_core, name="FridayCore", daemon=True)
+
+    if say_greeting:
+        from friday.personality import greet_for_time_of_day
+        # Spoken on the main thread before the core thread starts -- safe,
+        # no race with the audio loop (mic stream not opened yet).
+        core._speak(greet_for_time_of_day())
+
     core_thread.start()
 
     if root is not None:
