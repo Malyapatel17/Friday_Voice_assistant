@@ -11,9 +11,9 @@ putting event dicts on a queue.Queue. The HUD drains the queue from a
 Tk after() callback.
 """
 
+import math
 import tkinter as tk
 from queue import Empty
-from typing import Optional
 
 from friday import config as cfg
 
@@ -153,7 +153,6 @@ class FridayHUD:
                                     font=("Consolas", 14, "bold"))
         elif self.state == self.THINKING:
             # Orbiting dot: position on inner ring by frame angle.
-            import math
             angle = (self.frame * 12) % 360
             ox = cx + int((r - 18) * math.cos(math.radians(angle)))
             oy = cy + int((r - 18) * math.sin(math.radians(angle)))
@@ -164,7 +163,6 @@ class FridayHUD:
                                     font=("Consolas", 14, "bold"))
         elif self.state in (self.SPEAKING, self.LISTENING, self.NOTING):
             # 9 vertical bars from a sinusoidal table.
-            import math
             for i in range(9):
                 bar_x = cx - 36 + i * 9
                 phase = (self.frame * 0.4) + i * 0.6
