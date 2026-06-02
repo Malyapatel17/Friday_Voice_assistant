@@ -153,6 +153,12 @@ class FridayCore:
         elif cmd == "ask":
             self._on_ask(payload)
             self._go(STANDBY)
+        elif cmd == "note_start":
+            self._on_note_start()
+            self._go(STANDBY)
+        elif cmd == "note_read":
+            self._on_note_read()
+            self._go(STANDBY)
         elif cmd == "rest":
             self._speak("Goodbye boss, have a great day")
             self.running = False
@@ -198,6 +204,45 @@ class FridayCore:
             return
 
         self._speak(reply)
+
+    # ── Voice notes ───────────────────────────────────────────────────────────
+
+    def _on_note_start(self):
+        """Capture up to 30s of speech and append to today's notes file."""
+        from friday import notes
+
+        self._speak("Go ahead boss")
+
+        self._emit(EVT_NOTING)
+        audio = self.audio.record_command(max_seconds=30.0, silence_secs=2.0)
+        text  = self.audio.transcribe_command(audio)
+
+        if not text:
+            self._speak("Didn't catch that boss")
+            # _speak already emits SPEAKING_END; no extra event needed.
+            return
+
+        try:
+            count = notes.append(text)
+        except Exception as exc:
+            _log_error(f"notes.append failed: {exc}")
+            self._speak("Couldn't save the note boss")
+            return
+
+        self._speak("Noted boss")
+        self._emit(EVT_NOTE_SAVED, {"count": count})
+
+    def _on_note_read(self):
+        """Read today's notes back to the user."""
+        from friday import notes
+
+        entries = notes.read_today()
+        if not entries:
+            self._speak("No notes today boss")
+            return
+
+        for time_str, text in entries:
+            self._speak(f"At {time_str}, {text}")
 
     # -- Main loop -------------------------------------------------------------
 
