@@ -92,6 +92,11 @@ class FridayCore:
     def _on_ctrl_c(self, *_):
         print("\n\nShutting down Friday...")
         self.running = False
+        # Also signal the HUD directly: if the worker is blocked (mid note
+        # capture or TTS), it won't reach run()'s finally for a while, so push
+        # EVT_SHUTDOWN here so the HUD tears down and mainloop() returns now.
+        # The worker is a daemon thread, so the process exits regardless.
+        self._emit(EVT_SHUTDOWN)
 
     def _speak(self, text: str):
         self._emit(EVT_SPEAKING_START, {"text": text})
