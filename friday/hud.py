@@ -103,9 +103,16 @@ class FridayHUD:
         self._drain_queue()
 
     def stop(self):
-        """Tear down the HUD window. Safe to call multiple times."""
+        """Tear down the HUD and exit the Tk mainloop. Safe to call repeatedly."""
         try:
             self.win.destroy()
+        except Exception:
+            pass
+        # Destroying the root is what makes root.mainloop() return, so the
+        # process can exit. This runs on the main thread (called from the
+        # queue-drain callback), so it is Tk-safe.
+        try:
+            self.root.destroy()
         except Exception:
             pass
 
@@ -114,7 +121,12 @@ class FridayHUD:
     def _tick(self):
         self.frame += 1
         self._redraw()
-        self.root.after(cfg.HUD_FRAME_INTERVAL_MS, self._tick)
+        # Reschedule guarded: after stop() destroys root, the in-flight
+        # callback must not raise TclError on a dead application.
+        try:
+            self.root.after(cfg.HUD_FRAME_INTERVAL_MS, self._tick)
+        except Exception:
+            pass
 
     def _redraw(self):
         self.canvas.delete("all")
@@ -198,7 +210,12 @@ class FridayHUD:
                 self._handle_event(evt)
         except Empty:
             pass
-        self.root.after(cfg.HUD_QUEUE_POLL_MS, self._drain_queue)
+        # Reschedule guarded: this callback can itself destroy root (via an
+        # EVT_SHUTDOWN -> stop()), after which the re-arm would raise TclError.
+        try:
+            self.root.after(cfg.HUD_QUEUE_POLL_MS, self._drain_queue)
+        except Exception:
+            pass
 
     def _handle_event(self, evt: dict):
         kind    = evt.get("event")

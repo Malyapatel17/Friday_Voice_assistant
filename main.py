@@ -214,11 +214,10 @@ def main():
         sys.exit(1)
 
     def _run_core():
-        try:
-            core.run()
-        finally:
-            if root is not None:
-                root.after(0, root.destroy)
+        # core.run()'s own finally emits EVT_SHUTDOWN; the HUD drains that on
+        # the main thread and destroys the root, which makes mainloop() return.
+        # No cross-thread Tk call here (that would race the EVT_SHUTDOWN path).
+        core.run()
 
     core_thread = threading.Thread(target=_run_core, name="FridayCore", daemon=True)
     core_thread.start()
