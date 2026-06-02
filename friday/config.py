@@ -50,3 +50,8 @@ HUD_TEXT_COLOR        = "#cceeff"
 # ─────────────────────────────────────────────
 import os as _os
 GROQ_MODEL = _os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+
+# ─────────────────────────────────────────────
+# Voice notes
+# ─────────────────────────────────────────────
+NOTES_DIR = "notes"  # relative to project root (parent of main.py)
