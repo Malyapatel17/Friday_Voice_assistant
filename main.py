@@ -127,7 +127,7 @@ class FridayCore:
         audio = self.audio.record_command()
         text  = self.audio.transcribe_command(audio)
         self._emit(EVT_COMMAND_FINAL, {"text": text})
-        cmd   = self.audio.parse_command(text)
+        cmd, payload = self.audio.parse_command(text)
 
         if cmd == "work":
             self._speak("Starting work mode boss")
@@ -143,12 +143,54 @@ class FridayCore:
             time.sleep(1)
             launcher.open_shutdown_dialog(self.os_type)
             self._go(STANDBY)
+        elif cmd == "ask":
+            self._on_ask(payload)
+            self._go(STANDBY)
         elif cmd == "rest":
             self._speak("Goodbye boss, have a great day")
             self.running = False
         else:
             if self.debug and text:
                 print(f"[no match] '{text}'")
+
+    # ── Ask mode (GroqChat) ───────────────────────────────────────────────────
+
+    def _on_ask(self, payload: str):
+        """Send payload to GroqChat and speak the reply."""
+        from friday.conversation import GroqChat, check_internet
+        import os
+
+        if not payload:
+            self._speak("Ask me what, boss?")
+            return
+
+        self._emit(EVT_THINKING)
+
+        if not check_internet():
+            self._speak("I'm offline boss, can't reach my brain right now.")
+            return
+
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            self._speak("I need an API key for that boss, check the readme.")
+            return
+
+        if not hasattr(self, "_chat") or self._chat is None:
+            try:
+                self._chat = GroqChat(api_key=api_key, model=cfg.GROQ_MODEL)
+            except Exception as exc:
+                _log_error(f"GroqChat init failed: {exc}")
+                self._speak("Something went wrong reaching the brain boss.")
+                return
+
+        try:
+            reply = self._chat.ask(payload)
+        except Exception as exc:
+            _log_error(f"GroqChat ask failed: {exc}")
+            self._speak("Something went wrong reaching the brain boss.")
+            return
+
+        self._speak(reply)
 
     # -- Main loop -------------------------------------------------------------
 

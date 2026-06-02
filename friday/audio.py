@@ -207,25 +207,44 @@ class AudioManager:
     # ── Command parser ────────────────────────────────────────────────────────
 
     @staticmethod
-    def parse_command(text: str) -> str | None:
-        """Map a transcribed sentence to an internal command token."""
+    def parse_command(text: str) -> tuple[str | None, str]:
+        """Map a transcribed sentence to (token, payload).
+
+        token is one of: "work", "home", "close_tabs", "rest", "ask", None.
+        payload is the question text (for "ask") or "" otherwise.
+        """
         if not text:
-            return None
-        t = text.lower()
+            return None, ""
+        t = text.lower().strip()
 
+        # Existing verbs (checked first so the four legacy verbs never get
+        # shadowed by the implicit "ask" question-word triggers).
         if ("start" in t and "work" in t) or "start work" in t:
-            return "work"
-
+            return "work", ""
         if "daddy" in t or ("home" in t and "start" not in t):
-            return "home"
-
+            return "home", ""
         if "close" in t and ("tab" in t or "browser" in t or "all" in t):
-            return "close_tabs"
-
+            return "close_tabs", ""
         if any(w in t for w in ["rest", "sleep", "goodbye", "bye", "stop", "exit"]):
-            return "rest"
+            return "rest", ""
 
-        return None
+        # Explicit "ask <question>" trigger.
+        if t.startswith("ask "):
+            return "ask", t[4:].strip()
+
+        # "question for you" / "got a question" preamble.
+        for marker in ("question for you", "got a question"):
+            if marker in t:
+                payload = t.split(marker, 1)[1].strip(" ,.:?")
+                return "ask", payload
+
+        # Implicit ask: utterance starts with a question word.
+        first = t.split(" ", 1)[0]
+        if first in ("what", "who", "when", "where", "why", "how",
+                     "is", "are", "can", "should", "do", "does"):
+            return "ask", t
+
+        return None, ""
 
     # ── Housekeeping ──────────────────────────────────────────────────────────
 
