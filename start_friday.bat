@@ -6,6 +6,7 @@ set PROJECT=C:\Users\malya\.vscode\python practise\Friday\wake-up
 set VENV_PY=%PROJECT%\.venv\Scripts\python.exe
 set MAIN=%PROJECT%\main.py
 set LOG=%PROJECT%\friday_startup.log
+set ERR=%PROJECT%\friday_error.log
 set MODEL=%PROJECT%\model
 
 cd /d "%PROJECT%"
@@ -19,7 +20,7 @@ if not exist "%MODEL%\" (
     echo  Expected: %MODEL%
     echo  Download vosk-model-small-en-us-0.15 from:
     echo  https://alphacephei.com/vosk/models
-    echo  Extract it and rename the folder to "model"
+    echo  Extract and rename the folder to "model"
     echo.
     pause
     exit /b 1
@@ -33,14 +34,25 @@ if exist "%VENV_PY%" (
 
 echo [%DATE% %TIME%] Python: %PYTHON% >> "%LOG%"
 
-"%PYTHON%" "%MAIN%"
+:: Run Friday and capture stderr to error log
+"%PYTHON%" "%MAIN%" 2>> "%ERR%"
+
 set EXIT_CODE=%ERRORLEVEL%
 echo [%DATE% %TIME%] Friday exited (code %EXIT_CODE%) >> "%LOG%"
 
-if %EXIT_CODE% NEQ 0 (
+echo.
+echo ==============================
+if %EXIT_CODE% EQU 0 (
+    echo  Friday closed normally.
+) else (
+    echo  Friday exited with error code %EXIT_CODE%
+    echo  Check friday_error.log for the full traceback:
+    echo  %ERR%
     echo.
-    echo  *** Friday exited with code %EXIT_CODE% ***
-    echo  Check friday_startup.log for details
-    echo.
-    pause
+    echo  Last few lines of error log:
+    echo  ------------------------------
+    powershell -Command "if (Test-Path '%ERR%') { Get-Content '%ERR%' -Tail 20 }"
 )
+echo ==============================
+echo.
+pause
