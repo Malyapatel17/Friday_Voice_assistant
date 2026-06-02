@@ -210,7 +210,8 @@ class AudioManager:
     def parse_command(text: str) -> tuple[str | None, str]:
         """Map a transcribed sentence to (token, payload).
 
-        token is one of: "work", "home", "close_tabs", "rest", "ask", None.
+        token is one of: "work", "home", "close_tabs", "rest", "ask",
+        "note_start", "note_read", None.
         payload is the question text (for "ask") or "" otherwise.
         """
         if not text:
@@ -227,6 +228,16 @@ class AudioManager:
             return "close_tabs", ""
         if any(w in t for w in ["rest", "sleep", "goodbye", "bye", "stop", "exit"]):
             return "rest", ""
+
+        # Voice notes. Placed before the implicit question-word "ask" path so
+        # "what are my notes" returns note_read rather than being captured as
+        # an implicit ask by its leading "what".
+        if any(p in t for p in ("take a note", "new note", "make a note",
+                                "note this", "remember this")):
+            return "note_start", ""
+        if any(p in t for p in ("read my notes", "what are my notes",
+                                "play my notes", "any notes")):
+            return "note_read", ""
 
         # Explicit "ask <question>" trigger.
         if t.startswith("ask "):
