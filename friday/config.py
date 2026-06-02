@@ -44,3 +44,9 @@ HUD_RING_COLOR_IDLE   = "#446677"
 HUD_RING_COLOR_ACTIVE = "#33ccff"
 HUD_RING_COLOR_ERROR  = "#ff4444"
 HUD_TEXT_COLOR        = "#cceeff"
+
+# ─────────────────────────────────────────────
+# Ask mode (GroqChat)
+# ─────────────────────────────────────────────
+import os as _os
+GROQ_MODEL = _os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
