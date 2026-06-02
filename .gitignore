@@ -11,3 +11,4 @@ __pycache__/
 *_startup.log
 *_tray_error.log
 logs/
+/notes/
