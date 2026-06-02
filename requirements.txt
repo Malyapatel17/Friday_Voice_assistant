@@ -3,3 +3,5 @@ vosk
 faster-whisper
 pyttsx3
 pygame
+groq
+python-dotenv
