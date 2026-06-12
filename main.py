@@ -1,168 +1,287 @@
 #!/usr/bin/env python3
 """
-Friday — Voice-Activated Assistant  (Phase 1)
-Run: python main.py [--model path/to/model] [--debug]
+Friday -- Voice-Activated Assistant  (Phase 1 + JARVIS HUD)
+Run: python main.py [--model path/to/model] [--debug] [--no-hud]
 
-Say "Friday" → then within 30 seconds say a command:
-  "Let's start the work"  →  Claude.ai + ChatGPT + VS Code
-  "Daddy is home"         →  YouTube + Hotstar + Amazon Prime
-  "Close all tabs"        →  Close browsers + shutdown dialog
-  "You can rest"          →  Exit Friday
+Say "Friday" -> then within 30 seconds say a command:
+  "Let's start the work"  ->  Gmail + Claude.ai + ChatGPT + VS Code
+  "Daddy is home"         ->  YouTube + Hotstar + Amazon Prime
+  "Close all tabs"        ->  Close browsers + shutdown dialog
+  "You can rest"          ->  Exit Friday
 """
 
 import platform
+import queue
 import signal
 import sys
+import threading
 import time
+import traceback
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv is optional at runtime; env vars still work without it
 
 import friday.config as cfg
-from friday.audio  import AudioManager
-from friday        import launcher
-from friday.tts    import discover_offline_voice_id, speak
+from friday.audio import AudioManager
+from friday       import launcher
+from friday.hud   import (
+    make_hud,
+    EVT_WAKE_DETECTED, EVT_PARTIAL, EVT_COMMAND_FINAL,
+    EVT_THINKING, EVT_SPEAKING_START, EVT_SPEAKING_END,
+    EVT_NOTING, EVT_NOTE_SAVED, EVT_ERROR, EVT_SHUTDOWN,
+)
+from friday.tts   import discover_offline_voice_id, speak
 
-# ── States ────────────────────────────────────────────────────────────────────
+ERROR_LOG = Path(__file__).parent / "friday_error.log"
+
 STANDBY = "standby"
 COMMAND = "command"
 
 
-class FridayCore:
+def _log_error(msg: str):
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open(ERROR_LOG, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {msg}\n")
+    except Exception:
+        pass
 
-    def __init__(self, model_path: str | None = None, debug: bool = False):
+
+class FridayCore:
+    def __init__(self, event_queue: queue.Queue, model_path: str | None = None, debug: bool = False):
+        self.event_queue = event_queue
         self.debug   = debug
         self.os_type = platform.system()
         self.running = True
 
         print("=" * 60)
-        print("  🤖  FRIDAY  —  Voice Assistant  (Phase 1)")
+        print("  FRIDAY  --  Voice Assistant  (Phase 1 + HUD)")
         print("=" * 60)
-        print(f"\n🖥️   OS : {self.os_type}\n")
+        print(f"\n  OS : {self.os_type}\n")
 
-        # Allow CLI to override model path
         if model_path:
             cfg.MODEL_PATH = model_path
 
-        # Discover offline TTS voice once at startup
         self.voice_id = discover_offline_voice_id()
-
-        # Audio engine (Vosk wake + Whisper commands)
         self.audio = AudioManager(
             model_path=cfg.MODEL_PATH,
             wake_word=cfg.WAKE_WORD,
         )
 
-        # State machine bookkeeping
-        self.state      = STANDBY
-        self.cmd_start  = 0.0          # when COMMAND state began
+        self.state     = STANDBY
+        self.cmd_start = 0.0
 
         signal.signal(signal.SIGINT, self._on_ctrl_c)
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # -- HUD event helper ------------------------------------------------------
+
+    def _emit(self, event: str, payload: dict | None = None):
+        try:
+            self.event_queue.put({"event": event, "payload": payload})
+        except Exception:
+            pass  # never let HUD wiring break the core loop
+
+    # -- Helpers ---------------------------------------------------------------
 
     def _on_ctrl_c(self, *_):
-        print("\n\n👋 Shutting down Friday...")
+        print("\n\nShutting down Friday...")
         self.running = False
+        # Also signal the HUD directly: if the worker is blocked (mid note
+        # capture or TTS), it won't reach run()'s finally for a while, so push
+        # EVT_SHUTDOWN here so the HUD tears down and mainloop() returns now.
+        # The worker is a daemon thread, so the process exits regardless.
+        self._emit(EVT_SHUTDOWN)
 
     def _speak(self, text: str):
+        self._emit(EVT_SPEAKING_START, {"text": text})
         speak(
             text,
             audio_stream=self.audio.stream,
-            is_online=False,                  # Phase 1: offline only
+            is_online=False,
             offline_voice_id=self.voice_id,
             tts_rate=cfg.TTS_RATE,
         )
+        self._emit(EVT_SPEAKING_END)
 
     def _go(self, new_state: str):
-        """Transition to a new state and flush stale audio buffers."""
         self.state     = new_state
         self.cmd_start = time.time()
         self.audio.flush()
         if self.debug:
-            print(f"[state → {new_state}]")
+            print(f"[state -> {new_state}]")
 
-    # ── Standby handler (streaming, frame-by-frame) ───────────────────────────
+    # -- Standby handler -------------------------------------------------------
 
     def _handle_standby(self, frame: bytes):
         if self.audio.detect_wake_word(frame):
+            self._emit(EVT_WAKE_DETECTED)
             self._go(COMMAND)
             print("\n" + "=" * 55)
-            print("✨ FRIDAY ACTIVATED — say your command:")
-            print("   🖥️   'Let's start the work'")
-            print("   🎬   'Daddy is home'")
-            print("   🔴   'Close all tabs'")
-            print("   😴   'You can rest'")
-            print(f"⏱️   {cfg.ACTIVE_DURATION} second window")
+            print("FRIDAY ACTIVATED -- say your command")
             print("=" * 55 + "\n")
-            self._speak("Yes boss, I'm listening")
+            from friday.personality import wake_ack
+            self._speak(wake_ack())
 
-    # ── Command handler (blocking record → transcribe → act) ─────────────────
+    # -- Command handler -------------------------------------------------------
 
     def _handle_command(self):
-        # Timeout guard — if user never speaks, go back to standby
         if time.time() - self.cmd_start > cfg.ACTIVE_DURATION:
             self._speak("Didn't catch that boss, say Friday to try again")
             self._go(STANDBY)
             return
 
-        # Record up to 6 s (stops early on silence)
         audio = self.audio.record_command()
         text  = self.audio.transcribe_command(audio)
-        cmd   = self.audio.parse_command(text)
+        self._emit(EVT_COMMAND_FINAL, {"text": text})
+        cmd, payload = self.audio.parse_command(text)
 
         if cmd == "work":
             self._speak("Starting work mode boss")
             launcher.launch_work_apps(self.os_type)
             self._go(STANDBY)
-
         elif cmd == "home":
             self._speak("Welcome home boss, entertainment is ready")
             launcher.launch_entertainment_apps(self.os_type)
             self._go(STANDBY)
-
         elif cmd == "close_tabs":
             self._speak("Closing all tabs boss")
             launcher.close_browsers(self.os_type)
             time.sleep(1)
             launcher.open_shutdown_dialog(self.os_type)
             self._go(STANDBY)
-
+        elif cmd == "ask":
+            self._on_ask(payload)
+            self._go(STANDBY)
+        elif cmd == "note_start":
+            self._on_note_start()
+            self._go(STANDBY)
+        elif cmd == "note_read":
+            self._on_note_read()
+            self._go(STANDBY)
         elif cmd == "rest":
             self._speak("Goodbye boss, have a great day")
             self.running = False
-
         else:
-            # Heard something but didn't match — stay in COMMAND, keep listening
             if self.debug and text:
                 print(f"[no match] '{text}'")
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
+    # ── Ask mode (GroqChat) ───────────────────────────────────────────────────
+
+    def _on_ask(self, payload: str):
+        """Send payload to GroqChat and speak the reply."""
+        from friday.conversation import GroqChat, check_internet
+        import os
+
+        if not payload:
+            self._speak("Ask me what, boss?")
+            return
+
+        self._emit(EVT_THINKING)
+
+        if not check_internet():
+            self._speak("I'm offline boss, can't reach my brain right now.")
+            return
+
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            self._speak("I need an API key for that boss, check the readme.")
+            return
+
+        if not hasattr(self, "_chat") or self._chat is None:
+            try:
+                self._chat = GroqChat(api_key=api_key, model=cfg.GROQ_MODEL)
+            except Exception as exc:
+                _log_error(f"GroqChat init failed: {exc}")
+                self._speak("Something went wrong reaching the brain boss.")
+                return
+
+        try:
+            reply = self._chat.ask(payload)
+        except Exception as exc:
+            _log_error(f"GroqChat ask failed: {exc}")
+            self._speak("Something went wrong reaching the brain boss.")
+            return
+
+        self._speak(reply)
+
+    # ── Voice notes ───────────────────────────────────────────────────────────
+
+    def _on_note_start(self):
+        """Capture up to 30s of speech and append to today's notes file."""
+        from friday import notes
+
+        self._speak("Go ahead boss")
+
+        self._emit(EVT_NOTING)
+        audio = self.audio.record_command(max_seconds=30.0, silence_secs=2.0)
+        text  = self.audio.transcribe_command(audio)
+
+        if not text:
+            self._speak("Didn't catch that boss")
+            # _speak already emits SPEAKING_END; no extra event needed.
+            return
+
+        try:
+            count = notes.append(text)
+        except Exception as exc:
+            _log_error(f"notes.append failed: {exc}")
+            self._speak("Couldn't save the note boss")
+            return
+
+        self._speak("Noted boss")
+        self._emit(EVT_NOTE_SAVED, {"count": count})
+
+    def _on_note_read(self):
+        """Read today's notes back to the user."""
+        from friday import notes
+
+        entries = notes.read_today()
+        if not entries:
+            self._speak("No notes today boss")
+            return
+
+        for time_str, text in entries:
+            self._speak(f"At {time_str}, {text}")
+
+    # -- Main loop -------------------------------------------------------------
 
     def run(self):
         self.audio.start_stream()
-        print(f"\n🎧 Listening for wake word  '{cfg.WAKE_WORD}' ...")
-        print("💡 Press Ctrl+C to exit\n")
-
+        print(f"\nListening for wake word '{cfg.WAKE_WORD}' ...")
+        print("Press Ctrl+C to exit\n")
         try:
             while self.running:
                 if self.state == STANDBY:
                     frame = self.audio.read_frame()
                     self._handle_standby(frame)
                 elif self.state == COMMAND:
-                    self._handle_command()     # blocks during recording
+                    self._handle_command()
         except KeyboardInterrupt:
-            print("\n\n👋 Bye!")
+            print("\n\nBye!")
         except Exception as exc:
-            print(f"\n❌ Unexpected error: {exc}")
-            import traceback
+            tb = traceback.format_exc()
+            _log_error(f"CRASH in main loop:\n{tb}")
+            print(f"\n[ERROR] {type(exc).__name__}: {exc}")
+            print(f"Full traceback written to: {ERROR_LOG}")
             traceback.print_exc()
+            self._emit(EVT_ERROR, {"text": f"{type(exc).__name__}"})
         finally:
             self.audio.cleanup()
+            self._emit(EVT_SHUTDOWN)
             print("Goodbye!")
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# -- Entry point ---------------------------------------------------------------
 
 def main():
-    debug = "--debug" in sys.argv
+    debug    = "--debug" in sys.argv
+    use_hud  = "--no-hud" not in sys.argv
+    say_greeting = "--no-greeting" not in sys.argv
 
     model = None
     for i, arg in enumerate(sys.argv):
@@ -170,9 +289,55 @@ def main():
             model = sys.argv[i + 1]
 
     if not debug:
-        print("💡 Run with --debug to see live transcripts\n")
+        print("Tip: run with --debug to see live transcripts\n")
 
-    FridayCore(model_path=model, debug=debug).run()
+    event_queue: queue.Queue = queue.Queue()
+
+    if use_hud:
+        hud = make_hud(event_queue)
+        hud.prepare()   # creates the webview window before the core thread starts
+    else:
+        hud = None
+
+    try:
+        core = FridayCore(event_queue=event_queue, model_path=model, debug=debug)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        _log_error(f"CRASH at startup:\n{tb}")
+        print(f"\n[ERROR] Startup failed: {exc}")
+        print(f"Full traceback written to: {ERROR_LOG}")
+        traceback.print_exc()
+        sys.exit(1)
+
+    def _run_core():
+        # core.run()'s own finally emits EVT_SHUTDOWN; the HUD drains that on
+        # the main thread and destroys the root, which makes mainloop() return.
+        # No cross-thread Tk call here (that would race the EVT_SHUTDOWN path).
+        core.run()
+
+    core_thread = threading.Thread(target=_run_core, name="FridayCore", daemon=True)
+
+    if say_greeting:
+        from friday.personality import greet_for_time_of_day
+        # Spoken on the main thread before the core thread starts -- safe,
+        # no race with the audio loop (mic stream not opened yet).
+        core._speak(greet_for_time_of_day())
+
+    core_thread.start()
+
+    if hud is not None:
+        try:
+            hud.start()   # starts drain thread + webview event loop, blocks here
+        finally:
+            core.running = False
+            core_thread.join(timeout=7)
+    else:
+        # Headless mode (--no-hud): block on the worker thread.
+        try:
+            core_thread.join()
+        except KeyboardInterrupt:
+            core.running = False
+            core_thread.join(timeout=7)
 
 
 if __name__ == "__main__":

@@ -4,3 +4,11 @@ model/
 pycache/
 __pycache__/
 .env
+.log
+# Log files
+*.log
+*_error.log
+*_startup.log
+*_tray_error.log
+logs/
+/notes/
