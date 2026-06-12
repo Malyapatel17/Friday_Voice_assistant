@@ -5,3 +5,4 @@ pyttsx3
 pygame
 groq
 python-dotenv
+PySide6

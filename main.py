@@ -16,7 +16,6 @@ import signal
 import sys
 import threading
 import time
-import tkinter as tk
 import traceback
 from pathlib import Path
 
@@ -295,13 +294,10 @@ def main():
     event_queue: queue.Queue = queue.Queue()
 
     if use_hud:
-        root = tk.Tk()
-        root.withdraw()  # keep the empty root window hidden
-        hud = make_hud(root, event_queue)
-        hud.start()
+        hud = make_hud(event_queue)
+        hud.prepare()   # creates the webview window before the core thread starts
     else:
-        root = None
-        hud  = None
+        hud = None
 
     try:
         core = FridayCore(event_queue=event_queue, model_path=model, debug=debug)
@@ -329,9 +325,9 @@ def main():
 
     core_thread.start()
 
-    if root is not None:
+    if hud is not None:
         try:
-            root.mainloop()
+            hud.start()   # starts drain thread + webview event loop, blocks here
         finally:
             core.running = False
             core_thread.join(timeout=7)
